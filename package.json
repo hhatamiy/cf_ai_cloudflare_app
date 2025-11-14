@@ -9,7 +9,7 @@
 		"postinstall": "cd agents-starter && npm install",
 		"start": "cd agents-starter && npm start",
 		"build": "cd agents-starter && npm run build || (cd agents-starter && vite build)",
-		"deploy": "cd agents-starter && (npm run deploy || (vite build && wrangler deploy --config wrangler.jsonc))",
+		"deploy": "cd agents-starter && vite build && cd .. && wrangler deploy --config wrangler.jsonc",
 		"test": "cd agents-starter && npm test",
 		"check": "cd agents-starter && npm run check",
 		"format": "cd agents-starter && npm run format"

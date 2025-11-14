@@ -1,0 +1,40 @@
+/**
+ * Root wrangler configuration for deployment
+ * This file points to the agents-starter project files
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "agents-starter",
+	"main": "agents-starter/src/server.ts",
+	"compatibility_date": "2025-08-03",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"ai": {
+		"binding": "AI",
+		"remote": true
+	},
+	"assets": {
+		"directory": "agents-starter/dist/client"
+	},
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "Chat",
+				"class_name": "Chat"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"Chat"
+			]
+		}
+	],
+	"observability": {
+		"enabled": true
+	}
+}
+

@@ -6,7 +6,7 @@
 	"private": true,
 	"scripts": {
 		"install": "cd agents-starter && npm install",
-		"postinstall": "cd agents-starter && npm install",
+		"postinstall": "cd agents-starter && npm install && cd .. && npm run build",
 		"start": "cd agents-starter && npm start",
 		"build": "cd agents-starter && vite build",
 		"deploy": "npm run build && wrangler deploy --config wrangler.jsonc",

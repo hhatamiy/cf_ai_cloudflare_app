@@ -71,6 +71,7 @@ web_modules/
 !.env.example
 SETUP_GUIDE.md
 DEPLOYMENT_NOTES.md
+DEPLOYMENT_SOLUTION.md
 BUILD_CONFIG.md
 
 # parcel-bundler cache (https://parceljs.org/)

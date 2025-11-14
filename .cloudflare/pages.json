@@ -1,0 +1,11 @@
+{
+  "build": {
+    "command": "npm run build",
+    "cwd": "/",
+    "watch_paths": ["agents-starter/src/**"]
+  },
+  "deploy": {
+    "command": "npx wrangler deploy --config wrangler.jsonc"
+  }
+}
+

@@ -118,7 +118,11 @@ Deploy the application:
 npm run deploy
 ```
 
-After deployment, you'll receive a URL where your application is live. You can also find it in the [Cloudflare Dashboard](https://dash.cloudflare.com).
+After deployment, you'll receive a URL where your application is live. 
+
+**Your deployed app**: https://agents-starter.hhatamiy.workers.dev
+
+You can also find it in the [Cloudflare Dashboard](https://dash.cloudflare.com).
 
 ## 📖 Usage
 

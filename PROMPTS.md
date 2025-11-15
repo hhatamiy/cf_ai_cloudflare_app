@@ -265,6 +265,222 @@ Running `npm run deploy` fails with "sh: vite: command not found" even though vi
 
 ---
 
+---
+
+### Prompt 15: Improving AI Response Quality
+```
+The AI responses are too robotic - it's listing technical function names like "getWeatherInformation" and "scheduleTask" instead of talking naturally. The responses sound mechanical and unhelpful. How can I make the AI more conversational and human-like?
+```
+
+**Purpose**: Improve AI conversation quality and make responses more natural.
+
+**Context**: Users reported that the AI was:
+- Listing technical function/tool names instead of natural language
+- Being overly technical and robotic in responses
+- Not engaging conversationally
+- Example: Instead of saying "I can check the weather for you", it said "getWeatherInformation - show the weather..."
+
+**Solution Implemented**:
+
+1. **Rewrote system prompt to be conversational**:
+```typescript
+system: `You are a helpful, friendly AI assistant powered by Llama 3.3. 
+
+Be conversational and natural - talk like a helpful human, not a robot. Don't list technical function names or internal details.
+
+You can help with:
+- Answering questions about any topic
+- Checking weather in different cities (I'll ask for confirmation first)
+- Getting current times in different locations worldwide
+- Scheduling reminders and tasks (one-time, delayed, or recurring)
+- Managing scheduled tasks
+
+When users ask what you can do, give friendly examples like "I can tell you the weather, check times around the world, or help schedule reminders."
+
+Keep responses concise, natural, and helpful.`
+```
+
+2. **Key improvements**:
+   - Explicitly instructed to avoid technical names
+   - Added "talk like a helpful human, not a robot"
+   - Provided examples of natural phrasing
+   - Focused on user-friendly descriptions
+
+3. **Before vs After**:
+   - **Before**: "I can perform the following functions:getWeatherInformation - show the weather in a given city to the usergetLocalTime - get the local time for a specified location..."
+   - **After**: "I can help you check the weather in any city, find out what time it is around the world, or schedule reminders and tasks!"
+
+**Files Modified**:
+- `agents-starter/src/server.ts`: Updated system prompt for natural conversation
+
+**Learning**: AI behavior is heavily influenced by system prompt phrasing. Being explicit about conversational tone and providing examples of desired output style significantly improves response quality.
+
+---
+
+### Prompt 15: Adding Web Search Capability
+```
+How do I give the AI more functionality? Like it can't do anything properly. For example, I want it to be able to search the web.
+
+Follow-up: I just added the BRAVE_SEARCH_API_KEY to the .env file. Make the bot able to search the web.
+```
+
+**Purpose**: Extend the AI's capabilities by adding real-time web search functionality through Brave Search API integration.
+
+**Context**: User wanted to enhance the AI assistant's abilities beyond basic tool calls. Web search enables the AI to access current information, news, and facts it wasn't trained on.
+
+**Solution**:
+1. **Added Web Search Tool** (`agents-starter/src/tools.ts`):
+   - Created `searchWeb` tool using Brave Search API
+   - Auto-executes without confirmation (read-only operation)
+   - Returns top 5 formatted search results
+   - Includes error handling for API failures
+
+```typescript
+const searchWeb = tool({
+  description: "Search the web for current information, news, facts, or any topic. Use this when you need up-to-date information that you don't already know.",
+  inputSchema: z.object({ 
+    query: z.string().describe("The search query")
+  }),
+  execute: async ({ query }) => {
+    const { agent } = getCurrentAgent<Chat>();
+    const apiKey = (agent as any)?.env.BRAVE_SEARCH_API_KEY;
+    
+    const response = await fetch(
+      `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}`,
+      {
+        headers: {
+          'Accept': 'application/json',
+          'X-Subscription-Token': apiKey
+        }
+      }
+    );
+    
+    const data = await response.json();
+    const results = data.web?.results?.slice(0, 5);
+    return formattedResults;
+  }
+});
+```
+
+2. **Updated Environment Configuration**:
+   - Added `BRAVE_SEARCH_API_KEY: string` to `env.d.ts` Env interface
+   - API key needs to be set via Cloudflare secrets for production deployment
+
+3. **Updated System Prompt** (`agents-starter/src/server.ts`):
+   - Added "Searching the web for current information, news, and facts" to capabilities list
+   - Instructed AI to "Use the web search tool whenever you need current information, recent news, or facts you're unsure about"
+
+4. **Fixed Linting Errors**:
+   - Used type assertion `(agent as any)?.env` to access protected env property
+   - Removed unused imports (`getSchedulePrompt`, `stepCountIs`)
+   - Removed unsupported `maxSteps` parameter from `streamText`
+
+**Technical Challenges**:
+- Protected property access: `agent.env` is protected in DurableObject class, required type assertion
+- Environment variable binding: Had to use Cloudflare's secret management system
+- API integration: Formatting Brave Search results for AI consumption
+
+**Deployment Requirements**:
+```bash
+# For local development (.dev.vars file):
+BRAVE_SEARCH_API_KEY=your_key_here
+
+# For production (Cloudflare secret):
+cd agents-starter
+wrangler secret put BRAVE_SEARCH_API_KEY
+# Enter key when prompted
+```
+
+**Files Modified**:
+- `agents-starter/src/tools.ts`: Added searchWeb tool and exported it
+- `agents-starter/src/server.ts`: Updated system prompt with web search capability
+- `agents-starter/env.d.ts`: Added BRAVE_SEARCH_API_KEY type definition
+
+**Additional Tool Ideas Discussed**:
+- Calculator/Math tool for complex calculations
+- Image generation using Cloudflare AI (@cf/stabilityai/stable-diffusion-xl-base-1.0)
+- Code execution (with human confirmation for safety)
+- Database queries (if using D1)
+
+**Learning**: Tools are the primary way to extend AI capabilities. Auto-execute tools (with `execute` function) run immediately, while confirmation-required tools (without `execute`) present a dialog to the user first. Web search significantly improves the AI's usefulness for current events and factual queries.
+
+---
+
+### Prompt 16: Adding Loading Indicator for Better UX
+```
+When I ask the AI a question, I get an empty response. 
+Here are some potential things I think about adding:
+
+1. Add a "loading" sign that shows the message is loading, before the message is sent
+2. Check why the chatbot responds empty some times
+```
+
+**Purpose**: Improve user experience by adding visual feedback when the AI is processing a request, and investigate empty response issues.
+
+**Context**: Users were seeing empty responses from the AI and wanted better feedback during the thinking/processing phase. The lack of loading indicator made it unclear whether the app was working or frozen.
+
+**Solution**:
+
+1. **Added Loading Indicator** (`agents-starter/src/app.tsx`):
+   - Created an animated "AI is thinking..." message that appears during processing
+   - Shows when status is "submitted" or "streaming"
+   - Uses bouncing dots animation with staggered delays for smooth effect
+   - Styled consistently with other messages using Avatar and Card components
+
+```typescript
+{/* Loading indicator when AI is thinking */}
+{(status === "submitted" || status === "streaming") && (
+  <div className="flex justify-start">
+    <div className="flex gap-2 max-w-[85%]">
+      <Avatar username={"AI"} />
+      <div>
+        <Card className="p-3 rounded-md bg-neutral-100 dark:bg-neutral-900 rounded-bl-none border-assistant-border">
+          <div className="flex items-center gap-2">
+            <div className="flex gap-1">
+              <span className="animate-bounce" style={{ animationDelay: '0ms' }}>●</span>
+              <span className="animate-bounce" style={{ animationDelay: '150ms' }}>●</span>
+              <span className="animate-bounce" style={{ animationDelay: '300ms' }}>●</span>
+            </div>
+            <span className="text-sm text-muted-foreground">AI is thinking...</span>
+          </div>
+        </Card>
+      </div>
+    </div>
+  </div>
+)}
+```
+
+2. **Identified Empty Response Issue**:
+   - The empty responses were due to web search API errors (422 status)
+   - Fixed by ensuring `.dev.vars` file (not `.env`) has the correct API key
+   - Cloudflare Workers specifically use `.dev.vars` for local development secrets
+
+**Implementation Details**:
+- **Status tracking**: Uses existing `status` variable from `useAgentChat` hook
+- **Conditional rendering**: Only shows when AI is actively processing
+- **Animation**: Three dots with staggered `animationDelay` create wave effect
+- **Positioning**: Placed after messages but before `messagesEndRef` for proper scrolling
+- **Styling**: Matches existing message card styling for visual consistency
+
+**UX Improvements**:
+- ✅ Clear visual feedback that request is being processed
+- ✅ Reduces user anxiety about whether app is working
+- ✅ Professional, polished appearance
+- ✅ Consistent with modern chat UI patterns (ChatGPT, Claude, etc.)
+
+**Files Modified**:
+- `agents-starter/src/app.tsx`: Added loading indicator component
+
+**Common Pitfall Identified**:
+- `.env` files don't work with Cloudflare Workers
+- Must use `.dev.vars` for local development
+- Must use `wrangler secret put` for production deployment
+- This is a frequent source of "empty response" or "API key missing" errors
+
+**Learning**: Good UX requires immediate feedback for user actions. Loading states are critical for asynchronous operations. Also, each platform has its own conventions for environment variables - understanding the deployment target's requirements is essential.
+
+---
+
 ## Summary
 
 All prompts above were used during the development of this Cloudflare AI application. The development process leveraged AI assistance for:

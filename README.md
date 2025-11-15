@@ -15,9 +15,11 @@ This project fulfills all requirements for the Cloudflare AI app assignment:
 
 - 💬 **Real-time Chat Interface**: Interactive chat UI with streaming AI responses
 - 🤖 **AI-Powered Assistant**: Powered by Meta's Llama 3.3 70B Instruct model via Workers AI
+- 🔍 **Web Search Integration**: Real-time web search powered by Brave Search API
 - 🛠️ **Tool Integration**: Extensible tool system with human-in-the-loop confirmations
 - 📅 **Task Scheduling**: Schedule one-time, delayed, or recurring tasks using cron patterns
 - 💾 **Persistent State**: Conversation history and state persisted in Durable Objects
+- 💬 **Chat History**: Create, switch between, and delete multiple chat conversations
 - 🌓 **Dark/Light Theme**: Modern UI with theme support
 - ⚡ **Real-time Updates**: WebSocket-based real-time communication
 
@@ -97,7 +99,32 @@ curl https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run
   -d '{ "prompt": "agree" }'
 ```
 
-### 5. Run Locally
+### 5. Configure Web Search (Optional but Recommended)
+
+The AI assistant can search the web using Brave Search API. To enable this feature:
+
+1. **Get a Brave Search API Key**:
+   - Visit [https://brave.com/search/api/](https://brave.com/search/api/)
+   - Sign up for a free account (2,000 queries/month free)
+   - Get your API key from the dashboard
+
+2. **For Local Development**:
+   - Open `agents-starter/.dev.vars`
+   - Replace `your_brave_search_api_key_here` with your actual API key:
+   ```bash
+   BRAVE_SEARCH_API_KEY=your_actual_api_key
+   ```
+
+3. **For Production Deployment**:
+   ```bash
+   cd agents-starter
+   npx wrangler secret put BRAVE_SEARCH_API_KEY
+   # Enter your API key when prompted
+   ```
+
+> **Note**: The app will work without this API key, but the web search feature won't be available.
+
+### 6. Run Locally
 
 Start the development server:
 
@@ -110,7 +137,7 @@ This will:
 - Run the Worker locally with `wrangler dev`
 - Open the application in your browser (usually at `http://localhost:8787`)
 
-### 6. Deploy to Cloudflare
+### 7. Deploy to Cloudflare
 
 Deploy the application:
 
@@ -136,6 +163,7 @@ You can also find it in the [Cloudflare Dashboard](https://dash.cloudflare.com).
 
 The assistant has access to several tools:
 
+- **Web Search**: Search the internet for current information, news, and facts (automatic)
 - **Weather Information**: Get weather for a city (requires confirmation)
 - **Local Time**: Get current time for a location (automatic)
 - **Schedule Task**: Schedule tasks with flexible timing:
@@ -146,6 +174,12 @@ The assistant has access to several tools:
 - **Cancel Scheduled Task**: Cancel a task by ID
 
 ### Example Interactions
+
+**Search the web:**
+```
+User: "What's the latest news about AI?"
+Assistant: [Searches the web and provides results with summaries and links]
+```
 
 **Schedule a task:**
 ```

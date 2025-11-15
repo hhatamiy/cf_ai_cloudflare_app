@@ -1,13 +1,10 @@
 import { routeAgentRequest, type Schedule } from "agents";
 
-import { getSchedulePrompt } from "agents/schedule";
-
 import { AIChatAgent } from "agents/ai-chat-agent";
 import {
   generateId,
   streamText,
   type StreamTextOnFinishCallback,
-  stepCountIs,
   createUIMessageStream,
   convertToModelMessages,
   createUIMessageStreamResponse,
@@ -58,12 +55,25 @@ export class Chat extends AIChatAgent<Env> {
         const model = workersai("@cf/meta/llama-3.3-70b-instruct-fp8-fast" as any);
 
         const result = streamText({
-          system: `You are a helpful assistant that can do various tasks... 
+          system: `You are a helpful, friendly AI assistant powered by Llama 3.3. 
 
-${getSchedulePrompt({ date: new Date() })}
+Be conversational and natural - talk like a helpful human, not a robot. Don't list technical function names or internal details.
 
-If the user asks to schedule a task, use the schedule tool to schedule the task.
-`,
+You can help with:
+- Answering questions about any topic
+- Searching the web for current information, news, and facts
+- Checking weather in different cities (I'll ask for confirmation first)
+- Getting current times in different locations worldwide
+- Scheduling reminders and tasks (one-time, delayed, or recurring)
+- Managing scheduled tasks
+
+When users ask what you can do, give friendly examples like "I can search the web, tell you the weather, check times around the world, or help schedule reminders."
+
+Use the web search tool whenever you need current information, recent news, or facts you're unsure about.
+
+Current date: ${new Date().toLocaleDateString()}
+
+Keep responses concise, natural, and helpful.`,
 
           messages: convertToModelMessages(processedMessages),
           model,
@@ -72,8 +82,7 @@ If the user asks to schedule a task, use the schedule tool to schedule the task.
           // This is safe because our tools satisfy ToolSet interface (verified by 'satisfies' in tools.ts)
           onFinish: onFinish as unknown as StreamTextOnFinishCallback<
             typeof allTools
-          >,
-          stopWhen: stepCountIs(10)
+          >
         });
 
         writer.merge(result.toUIMessageStream());

@@ -29,9 +29,40 @@ const getLocalTime = tool({
   inputSchema: z.object({ location: z.string() }),
   execute: async ({ location }) => {
     console.log(`Getting local time for ${location}`);
-    return "10am";
+    
+    // Get current time in the requested location
+    const now = new Date();
+    const timeString = now.toLocaleTimeString('en-US', { 
+      timeZone: getTimezone(location),
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true 
+    });
+    
+    return `The current time in ${location} is ${timeString}.`;
   }
 });
+
+// Helper function to map locations to timezones
+function getTimezone(location: string): string {
+  const timezones: Record<string, string> = {
+    'new york': 'America/New_York',
+    'nyc': 'America/New_York',
+    'los angeles': 'America/Los_Angeles',
+    'la': 'America/Los_Angeles',
+    'chicago': 'America/Chicago',
+    'london': 'Europe/London',
+    'paris': 'Europe/Paris',
+    'tokyo': 'Asia/Tokyo',
+    'sydney': 'Australia/Sydney',
+    'san francisco': 'America/Los_Angeles',
+    'seattle': 'America/Los_Angeles',
+    'boston': 'America/New_York',
+  };
+  
+  const key = location.toLowerCase();
+  return timezones[key] || 'America/New_York'; // Default to ET
+}
 
 const scheduleTask = tool({
   description: "A tool to schedule a task to be executed at a later time",
@@ -109,6 +140,73 @@ const cancelScheduledTask = tool({
 });
 
 /**
+ * Web search tool that executes automatically
+ * Uses Brave Search API to search the web for current information
+ */
+const searchWeb = tool({
+  description: "Search the web for current information, news, facts, or any topic. Use this when you need up-to-date information that you don't already know.",
+  inputSchema: z.object({ 
+    query: z.string().describe("The search query")
+  }),
+  execute: async ({ query }) => {
+    try {
+      const { agent } = getCurrentAgent<Chat>();
+      // Access env through type assertion since it's protected but accessible at runtime
+      const apiKey = (agent as any)?.env.BRAVE_SEARCH_API_KEY;
+      
+      if (!apiKey) {
+        return "Web search is not configured. Please add BRAVE_SEARCH_API_KEY to environment variables.";
+      }
+      
+      console.log(`Searching web for: ${query}`);
+      
+      // Build URL with required parameters
+      const searchUrl = new URL('https://api.search.brave.com/res/v1/web/search');
+      searchUrl.searchParams.append('q', query);
+      searchUrl.searchParams.append('count', '5'); // Number of results
+      
+      const response = await fetch(searchUrl.toString(), {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Accept-Encoding': 'gzip',
+          'X-Subscription-Token': apiKey
+        }
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Brave Search API error: ${response.status} - ${errorText}`);
+        return `Search temporarily unavailable (Error ${response.status}). Please try again.`;
+      }
+      
+      const data = await response.json() as any;
+      
+      // Format top results for the AI
+      const results = data.web?.results?.slice(0, 5).map((r: any) => ({
+        title: r.title,
+        description: r.description,
+        url: r.url
+      })) || [];
+      
+      if (results.length === 0) {
+        return `No results found for "${query}".`;
+      }
+      
+      // Format results in a readable way
+      const formattedResults = results.map((r: any, i: number) => 
+        `${i + 1}. ${r.title}\n   ${r.description}\n   ${r.url}`
+      ).join('\n\n');
+      
+      return `Search results for "${query}":\n\n${formattedResults}`;
+    } catch (error) {
+      console.error("Web search error:", error);
+      return `Search error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+    }
+  }
+});
+
+/**
  * Export all available tools
  * These will be provided to the AI model to describe available capabilities
  */
@@ -117,7 +215,8 @@ export const tools = {
   getLocalTime,
   scheduleTask,
   getScheduledTasks,
-  cancelScheduledTask
+  cancelScheduledTask,
+  searchWeb
 } satisfies ToolSet;
 
 /**

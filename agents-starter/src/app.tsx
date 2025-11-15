@@ -23,8 +23,12 @@ import {
   Sun,
   Trash,
   PaperPlaneTilt,
-  Stop
+  Stop,
+  List
 } from "@phosphor-icons/react";
+
+// Chat sidebar
+import { ChatSidebar } from "@/components/chat-sidebar/ChatSidebar";
 
 // List of tools that require human confirmation
 // NOTE: this should match the tools that don't have execute functions in tools.ts
@@ -32,15 +36,49 @@ const toolsRequiringConfirmation: (keyof typeof tools)[] = [
   "getWeatherInformation"
 ];
 
+interface Chat {
+  id: string;
+  title: string;
+  createdAt: Date;
+}
+
 export default function Chat() {
   const [theme, setTheme] = useState<"dark" | "light">(() => {
     // Check localStorage first, default to dark if not found
     const savedTheme = localStorage.getItem("theme");
     return (savedTheme as "dark" | "light") || "dark";
   });
+  
+  // Chat management state
+  const [chats, setChats] = useState<Chat[]>(() => {
+    const saved = localStorage.getItem("chats");
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return parsed.map((c: Chat) => ({ ...c, createdAt: new Date(c.createdAt) }));
+    }
+    const defaultChat: Chat = { id: "default", title: "New Chat", createdAt: new Date() };
+    return [defaultChat];
+  });
+  
+  const [currentChatId, setCurrentChatId] = useState<string>(() => {
+    const saved = localStorage.getItem("currentChatId");
+    return saved || "default";
+  });
+  
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const [textareaHeight, setTextareaHeight] = useState("auto");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // Save chats to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem("chats", JSON.stringify(chats));
+  }, [chats]);
+  
+  // Save current chat ID
+  useEffect(() => {
+    localStorage.setItem("currentChatId", currentChatId);
+  }, [currentChatId]);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -69,9 +107,49 @@ export default function Chat() {
     const newTheme = theme === "dark" ? "light" : "dark";
     setTheme(newTheme);
   };
+  
+  // Chat management functions
+  const handleNewChat = () => {
+    const newChat: Chat = {
+      id: `chat-${Date.now()}`,
+      title: "New Chat",
+      createdAt: new Date()
+    };
+    setChats(prev => [newChat, ...prev]);
+    setCurrentChatId(newChat.id);
+    setSidebarOpen(false);
+  };
+  
+  const handleSelectChat = (id: string) => {
+    setCurrentChatId(id);
+    setSidebarOpen(false);
+  };
+  
+  const handleDeleteChat = (id: string) => {
+    if (chats.length === 1) {
+      alert("Cannot delete the last chat. Create a new one first!");
+      return;
+    }
+    
+    const newChats = chats.filter(c => c.id !== id);
+    setChats(newChats);
+    
+    if (currentChatId === id) {
+      setCurrentChatId(newChats[0].id);
+    }
+  };
+  
+  // Update chat title based on first message
+  useEffect(() => {
+    const currentChat = chats.find(c => c.id === currentChatId);
+    if (currentChat && currentChat.title === "New Chat") {
+      // Will be updated when first message is sent
+    }
+  }, [currentChatId, chats]);
 
   const agent = useAgent({
-    agent: "chat"
+    agent: "chat",
+    id: currentChatId
   });
 
   const [agentInput, setAgentInput] = useState("");
@@ -136,9 +214,31 @@ export default function Chat() {
   };
 
   return (
-    <div className="h-[100vh] w-full p-4 flex justify-center items-center bg-fixed overflow-hidden">
-      <div className="h-[calc(100vh-2rem)] w-full mx-auto max-w-lg flex flex-col shadow-xl rounded-md overflow-hidden relative border border-neutral-300 dark:border-neutral-800">
+    <div className="h-[100vh] w-full flex overflow-hidden bg-neutral-100 dark:bg-neutral-950">
+      {/* Chat Sidebar */}
+      <ChatSidebar
+        chats={chats}
+        currentChatId={currentChatId}
+        onNewChat={handleNewChat}
+        onSelectChat={handleSelectChat}
+        onDeleteChat={handleDeleteChat}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+      />
+      
+      {/* Main Chat Area */}
+      <div className="flex-1 flex justify-center items-center p-4">
+        <div className="h-full w-full max-w-4xl flex flex-col shadow-xl rounded-md overflow-hidden relative border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-neutral-900">
         <div className="px-4 py-3 border-b border-neutral-300 dark:border-neutral-800 flex items-center gap-3 sticky top-0 z-10">
+          {/* Sidebar toggle for mobile */}
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="lg:hidden p-2 rounded-md hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-colors"
+            title="Toggle sidebar"
+          >
+            <List size={24} className="text-neutral-700 dark:text-neutral-300" />
+          </button>
+          
           <div className="flex items-center justify-center h-8 w-8">
             <svg
               width="28px"
@@ -341,6 +441,28 @@ export default function Chat() {
               </div>
             );
           })}
+          
+          {/* Loading indicator when AI is thinking */}
+          {(status === "submitted" || status === "streaming") && (
+            <div className="flex justify-start">
+              <div className="flex gap-2 max-w-[85%]">
+                <Avatar username={"AI"} />
+                <div>
+                  <Card className="p-3 rounded-md bg-neutral-100 dark:bg-neutral-900 rounded-bl-none border-assistant-border">
+                    <div className="flex items-center gap-2">
+                      <div className="flex gap-1">
+                        <span className="animate-bounce" style={{ animationDelay: '0ms' }}>●</span>
+                        <span className="animate-bounce" style={{ animationDelay: '150ms' }}>●</span>
+                        <span className="animate-bounce" style={{ animationDelay: '300ms' }}>●</span>
+                      </div>
+                      <span className="text-sm text-muted-foreground">AI is thinking...</span>
+                    </div>
+                  </Card>
+                </div>
+              </div>
+            </div>
+          )}
+          
           <div ref={messagesEndRef} />
         </div>
 
@@ -413,6 +535,7 @@ export default function Chat() {
             </div>
           </div>
         </form>
+        </div>
       </div>
     </div>
   );

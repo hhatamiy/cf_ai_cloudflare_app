@@ -31,7 +31,7 @@ const AvatarComponent = ({
     <Slot
       as={as ?? "div"}
       className={cn(
-        "btn btn-secondary circular add-focus relative overflow-hidden",
+        "btn btn-secondary circular add-focus relative overflow-hidden rounded-full",
         {
           "add-size-sm": size === "sm",
           "add-size-md": size === "md",
@@ -50,14 +50,14 @@ const AvatarComponent = ({
     >
       {image ? (
         <img
-          className="w-full"
+          className="w-full h-full rounded-full object-cover"
           height={size === "sm" ? 28 : size === "base" ? 32 : 36}
           width={size === "sm" ? 28 : size === "base" ? 32 : 36}
           src={image}
           alt={username}
         />
       ) : (
-        <p className="text-100 font-bold">{firstInitial}</p>
+        <p className="text-100 font-bold select-none">{firstInitial}</p>
       )}
     </Slot>
   );

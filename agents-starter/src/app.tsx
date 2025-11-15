@@ -245,14 +245,14 @@ export default function Chat() {
                   className={`flex ${isUser ? "justify-end" : "justify-start"}`}
                 >
                   <div
-                    className={`flex gap-2 max-w-[85%] ${
+                    className={`flex gap-3 max-w-[85%] ${
                       isUser ? "flex-row-reverse" : "flex-row"
                     }`}
                   >
                     {showAvatar && !isUser ? (
-                      <Avatar username={"AI"} />
+                      <Avatar username={"AI"} size="base" className="flex-shrink-0" />
                     ) : (
-                      !isUser && <div className="w-8" />
+                      !isUser && <div className="w-8 flex-shrink-0" />
                     )}
 
                     <div>
@@ -380,8 +380,8 @@ export default function Chat() {
             return agentMessages.length === 0 || !hasAssistantMessage || !hasTextContent;
           })() && (
             <div className="flex justify-start">
-              <div className="flex gap-2 max-w-[85%]">
-                <Avatar username={"AI"} />
+              <div className="flex gap-3 max-w-[85%]">
+                <Avatar username={"AI"} size="base" className="flex-shrink-0" />
                 <div>
                   <Card className="p-3 rounded-md bg-neutral-100 dark:bg-neutral-900 rounded-bl-none border-assistant-border">
                     <div className="flex items-center gap-2">

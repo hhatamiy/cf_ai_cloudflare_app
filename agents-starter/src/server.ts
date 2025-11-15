@@ -66,26 +66,41 @@ export class Chat extends AIChatAgent<Env> {
             executions
           });
 
-          // CRITICAL FIX: Check if the last message is an assistant message with tool error but no text
+          // CRITICAL FIX: Check if the last message is an assistant message with tool call but no text response
+          // The model MUST always generate text after calling a tool, but sometimes it doesn't
           // If so, we need to add a system message to prompt the model to respond
           const lastProcessedMessage = processedMessages[processedMessages.length - 1];
           if (lastProcessedMessage?.role === "assistant" && lastProcessedMessage.parts) {
-            const hasToolError = lastProcessedMessage.parts.some((part) => {
+            // Check if there's any completed tool call
+            const hasCompletedToolCall = lastProcessedMessage.parts.some((part) => {
               if (!isToolUIPart(part)) return false;
-              // Type assertion needed because isToolUIPart narrows the type
               const toolPart = part as any;
-              if (toolPart.state !== "output-available") return false;
-              const output = typeof toolPart.output === "string" ? toolPart.output.toLowerCase() : "";
-              return output.includes("error") || output.includes("invalid") || output.includes("failed");
+              return toolPart.state === "output-available";
             });
             
+            // Check if there's any meaningful text content
             const hasNoTextContent = !lastProcessedMessage.parts.some((part) => 
               part.type === "text" && part.text && part.text.trim().length > 0
             );
             
-            if (hasToolError && hasNoTextContent) {
-              console.warn("Tool error without text response detected - adding continuation prompt");
-              // Add a user message to prompt the model to explain the error
+            // If we have a tool call result but no text response, force the model to continue
+            if (hasCompletedToolCall && hasNoTextContent) {
+              console.warn("Tool call completed without text response - adding continuation prompt");
+              
+              // Check if the tool had an error
+              const hasToolError = lastProcessedMessage.parts.some((part) => {
+                if (!isToolUIPart(part)) return false;
+                const toolPart = part as any;
+                if (toolPart.state !== "output-available") return false;
+                const output = typeof toolPart.output === "string" ? toolPart.output.toLowerCase() : "";
+                return output.includes("error") || output.includes("invalid") || output.includes("failed");
+              });
+              
+              // Add a user message to prompt the model to explain the tool result
+              const promptText = hasToolError 
+                ? "[System: The tool call failed with an error. Please explain to the user what went wrong and how they can provide the correct input format.]"
+                : "[System: The tool call completed successfully. Please explain the result to the user in a natural, conversational way.]";
+              
               processedMessages = [
                 ...processedMessages,
                 {
@@ -93,7 +108,7 @@ export class Chat extends AIChatAgent<Env> {
                   role: "user",
                   parts: [{
                     type: "text",
-                    text: "[System: The tool call failed with an error. Please explain to the user what went wrong and how they can provide the correct input format.]"
+                    text: promptText
                   }],
                   metadata: {
                     createdAt: new Date()

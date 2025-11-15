@@ -123,57 +123,43 @@ export class Chat extends AIChatAgent<Env> {
           // Use Llama 3.3 70B instruct model (fp8-fast variant for better performance)
           const model = workersai("@cf/meta/llama-3.3-70b-instruct-fp8-fast" as any);
 
+          // Debug logging to see what messages are being sent
+          console.log("Messages being sent to model:", JSON.stringify(processedMessages.slice(-3), null, 2));
+
           const result = streamText({
-            system: `You are a helpful, friendly AI assistant powered by Llama 3.3. 
+            system: `You are a helpful AI assistant. When users ask questions, you must ALWAYS provide a complete text answer.
 
-Be conversational and natural - talk like a helpful human, not a robot. Don't list technical function names or internal details.
+CRITICAL RULE: NEVER stop without providing a text response. Even after using a tool, you MUST explain the result to the user in your own words.
 
-You can help with:
-- Answering questions about any topic
-- Searching the web for current information, news, and facts
-- Checking weather in different cities
-- Getting current times in different locations worldwide
-- Scheduling reminders and tasks (one-time, delayed, or recurring)
-- Managing scheduled tasks
+Your process:
+1. When a user asks a question, decide if you need a tool
+2. If you need a tool (like getLocalTime, searchWeb, etc.), call it
+3. After getting the tool result, IMMEDIATELY write a natural response explaining the result
+4. NEVER end your turn without generating explanatory text
 
-CRITICAL: When you need to use tools (like searching the web, getting weather, scheduling tasks), use them naturally through the tool calling system. DO NOT output tool calls as text or JSON in your response. Never include JSON like {"type": "function", "name": "...", "parameters": {}} in your text responses. Just use the tools normally - they will be called automatically in the background.
+Example correct behavior:
+- User: "What time is it in London?"
+- You call getLocalTime tool → Get result: "Saturday, November 15, 2025 at 07:02:24 AM GMT"
+- You MUST then write: "It's currently 7:02 AM on Saturday, November 15th in London."
 
-CRITICAL - TOOL CALL FOLLOW-UP: After ANY tool call completes (whether it succeeds or fails), you MUST ALWAYS generate a text response to the user. Tool results are just data - you must interpret them and write a complete, conversational response. NEVER end your response after just calling a tool. 
+Example WRONG behavior (NEVER do this):
+- User: "What time is it in London?"
+- You call getLocalTime tool → Get result
+- You stop without explaining ❌ WRONG!
 
-IMPORTANT - VALIDATION ERRORS: If a tool call fails due to invalid input (validation error), you MUST:
-1. Read the error message carefully to understand what went wrong
-2. Write a friendly message explaining the issue to the user
-3. Provide specific guidance on the correct format or valid inputs
-4. Offer to help with a corrected version
-Example: If scheduling fails with "Invalid date" for "tomorrow", explain that dates need to be in YYYY-MM-DD format and suggest using a specific date like "2025-11-16".
+Available tools:
+- getLocalTime: Get current time in any city
+- getWeatherInformation: Get weather for any city
+- searchWeb: Search the web for information
+- scheduleTask: Schedule a task
+- getScheduledTasks: List scheduled tasks
+- cancelScheduledTask: Cancel a task
 
-Examples of proper follow-up:
-- If you call searchWeb and get results, write a paragraph summarizing and answering the user's question
-- If you call getWeatherInformation and get weather data, write a friendly message sharing that weather information
-- If a tool returns an error message, write a helpful response explaining the situation to the user and suggest alternatives if possible
-- If a tool validation fails, explain what input format is expected and give examples
-- ALWAYS provide a text response after tool calls - the tool result alone is never sufficient
-- IMPORTANT: Even if a tool fails with an error, you MUST still generate a complete text response explaining what went wrong and how the user can proceed
-
-IMPORTANT FORMATTING RULES:
-- When listing items, use proper markdown with line breaks between each item
-- For numbered lists, put each number on a new line
-- For bullet lists, put each bullet on a new line
-- Use double line breaks between paragraphs
-- Example of good formatting:
-  "I can help you with:
-  
-  1. Searching the web for information
-  2. Getting weather updates
-  3. Scheduling tasks"
-
-When users ask what you can do, give friendly examples in a natural conversational way, not as a formatted list.
-
-Use the web search tool whenever you need current information, recent news, or facts you're unsure about.
+MANDATORY: After every tool call, write a conversational response. The tool result is not enough - explain it naturally.
 
 Current date: ${new Date().toLocaleDateString()}
 
-Keep responses concise, natural, and helpful. Limit responses to 2-3 paragraphs when possible.`,
+Be concise, friendly, and helpful.`,
 
             messages: convertToModelMessages(processedMessages),
             model,
@@ -189,6 +175,95 @@ Keep responses concise, natural, and helpful. Limit responses to 2-3 paragraphs 
 
           // Merge the result stream - this handles tool calls and waits for results
           await writer.merge(result.toUIMessageStream());
+          
+          // CRITICAL FIX: After stream completes, check if we got a tool result but no text explanation
+          // Wait a moment for messages to be saved, then check the actual messages
+          await new Promise(resolve => setTimeout(resolve, 100));
+          const currentMessages = this.messages;
+          const lastMessage = currentMessages[currentMessages.length - 1];
+          
+          if (lastMessage?.role === "assistant" && lastMessage.parts) {
+            // Check if there's a completed tool call
+            const toolPart = lastMessage.parts.find((part) => {
+              if (!isToolUIPart(part)) return false;
+              const tp = part as any;
+              return tp.state === "output-available";
+            }) as any;
+            
+            // Check if there's no text content
+            const hasNoTextContent = !lastMessage.parts.some((part) => 
+              part.type === "text" && part.text && part.text.trim().length > 0
+            );
+            
+            // If we have a tool result but no text, manually write a response
+            if (toolPart && hasNoTextContent && toolPart.output) {
+              console.warn("Tool completed but no text response - manually generating explanation");
+              
+              // Extract the tool output
+              const toolOutput = typeof toolPart.output === "string" ? toolPart.output : JSON.stringify(toolPart.output);
+              const toolName = toolPart.type.replace("tool-", "");
+              
+              // Generate a simple explanation based on the tool output
+              let explanation = "";
+              if (toolOutput.toLowerCase().includes("not found") || toolOutput.toLowerCase().includes("error")) {
+                explanation = `I encountered an issue: ${toolOutput}`;
+              } else if (toolName === "getLocalTime") {
+                // Extract time from output like "Current time in London:\nSaturday, November 15, 2025 at 07:02:24 AM GMT"
+                const timeMatch = toolOutput.match(/at (.+)$/m);
+                if (timeMatch) {
+                  explanation = `It's currently ${timeMatch[1]} in ${toolPart.input?.location || "that location"}.`;
+                } else {
+                  explanation = toolOutput;
+                }
+              } else if (toolName === "getWeatherInformation") {
+                explanation = `Here's the weather information: ${toolOutput}`;
+              } else {
+                explanation = toolOutput;
+              }
+              
+              // Write the explanation to the stream
+              try {
+                const textId = generateId();
+                // Write text start, delta, and end
+                await writer.write({
+                  type: "text-start",
+                  id: textId
+                });
+                await writer.write({
+                  type: "text-delta",
+                  delta: explanation,
+                  id: textId
+                });
+                await writer.write({
+                  type: "text-end",
+                  id: textId
+                });
+              } catch (writeError) {
+                // If stream is already closed, update the message directly
+                console.warn("Stream closed, updating message directly:", writeError);
+                try {
+                  // Update the last message to include the text explanation
+                  const updatedMessages = [...currentMessages];
+                  const lastIndex = updatedMessages.length - 1;
+                  if (updatedMessages[lastIndex]?.role === "assistant") {
+                    updatedMessages[lastIndex] = {
+                      ...updatedMessages[lastIndex],
+                      parts: [
+                        ...(updatedMessages[lastIndex].parts || []),
+                        {
+                          type: "text",
+                          text: explanation
+                        }
+                      ]
+                    };
+                    await this.saveMessages(updatedMessages);
+                  }
+                } catch (saveError) {
+                  console.error("Error updating message directly:", saveError);
+                }
+              }
+            }
+          }
         } catch (error) {
           // Handle stream errors gracefully
           console.error("Stream execution error:", error);

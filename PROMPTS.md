@@ -173,15 +173,117 @@ How should I handle cases where the Workers AI binding might not be available or
 
 ---
 
+## Error Handling and Debugging
+
+### Prompt 11: Fixing OpenAI Key Check Error
+```
+The application is showing a blank screen with console errors about "check-open-ai-key" endpoint not found and "HasOpenAIKey" component errors. We switched to Workers AI but the frontend still checks for OpenAI keys. How do I remove this check?
+```
+
+**Purpose**: Remove legacy OpenAI key validation that's causing the app to fail.
+
+**Context**: After switching from OpenAI to Workers AI (Llama 3.3), the frontend still had code checking for OpenAI API keys, causing:
+- 404 error on `/check-open-ai-key` endpoint
+- React component error in `HasOpenAIKey`
+- Blank screen preventing app from loading
+
+**Solution Implemented**:
+1. Removed `HasOpenAIKey` component from `app.tsx`
+2. Removed `hasOpenAiKeyPromise` fetch call
+3. Removed unused `use` React import
+4. Removed corresponding `/check-open-ai-key` endpoint check from server
+
+**Files Modified**:
+- `agents-starter/src/app.tsx`: Removed OpenAI key check component and related code
+
+---
+
+### Prompt 12: Understanding Console Warnings
+```
+I see ReadableStream errors in the console about "Cannot close an errored readable stream". The app works fine but these errors appear. What are they and should I fix them?
+```
+
+**Purpose**: Understand non-breaking console warnings.
+
+**Context**: After deployment, browser console shows warnings:
+```
+Uncaught TypeError: Failed to execute 'close' on 'ReadableStreamDefaultController': 
+Cannot close an errored readable stream
+```
+
+**Analysis**:
+- These are internal warnings from the `agents` library's WebSocket stream handling
+- They occur during cleanup of AI streaming responses
+- **They do not break functionality** - the chat works perfectly
+- Common in streaming applications with real-time data
+
+**Resolution**: 
+- No code changes needed - these are library internals
+- The errors are non-blocking and don't affect user experience
+- Future versions of the agents library may handle these more gracefully
+
+---
+
+## Deployment Troubleshooting
+
+### Prompt 13: Assets Directory Not Found Error
+```
+Deployment fails with error: "The directory specified by the 'assets.directory' field in your configuration file does not exist: /opt/buildhome/repo/agents-starter/dist/client"
+```
+
+**Purpose**: Fix deployment configuration so build runs before deploy.
+
+**Context**: CI/CD was running `npx wrangler deploy` directly without building first, so the assets directory didn't exist.
+
+**Solution**:
+1. Updated root `package.json` scripts to delegate properly to `agents-starter/`
+2. Changed deploy script from direct wrangler commands to using npm scripts
+3. Ensured build runs before deploy: `"deploy": "cd agents-starter && npm run deploy"`
+
+**Learning**: In CI/CD environments, ensure the build process creates all necessary files before deployment attempts to reference them.
+
+---
+
+### Prompt 14: Vite Command Not Found
+```
+Running `npm run deploy` fails with "sh: vite: command not found" even though vite is installed in package.json
+```
+
+**Purpose**: Fix script execution to use locally installed binaries.
+
+**Context**: Running `vite build` directly from root doesn't work because vite is installed in `agents-starter/node_modules`.
+
+**Solution**: 
+- Changed scripts to use npm run commands which properly resolve local node_modules bins
+- Updated root package.json to delegate all commands to agents-starter:
+  ```json
+  "build": "cd agents-starter && npm run build",
+  "deploy": "cd agents-starter && npm run deploy"
+  ```
+
+**Learning**: Always use `npm run <script>` or `npx <command>` to ensure locally installed binaries are found in node_modules/.bin.
+
+---
+
 ## Summary
 
 All prompts above were used during the development of this Cloudflare AI application. The development process leveraged AI assistance for:
 
 1. **Planning**: Understanding requirements and architecture
 2. **Implementation**: Code migration and feature development  
-3. **Problem Solving**: Debugging and fixing issues
-4. **Documentation**: Creating comprehensive project documentation
-5. **Verification**: Ensuring all requirements are met
+3. **Problem Solving**: Debugging and fixing issues (blank screens, deployment errors, build issues)
+4. **Error Handling**: Identifying and resolving both critical and non-critical errors
+5. **Documentation**: Creating comprehensive project documentation
+6. **Verification**: Ensuring all requirements are met
+7. **Deployment**: Troubleshooting and fixing CI/CD configuration issues
 
-AI-assisted coding significantly accelerated development while maintaining code quality and ensuring all assignment requirements are properly fulfilled.
+### Key Learnings
+
+- **Incremental Problem Solving**: Break down complex errors into smaller, manageable issues
+- **Error Classification**: Distinguish between critical errors (broken functionality) and warnings (cosmetic issues)
+- **Environment Awareness**: Local development vs production deployment have different constraints
+- **Dependency Management**: Understand where binaries are installed and how to execute them correctly
+- **Configuration Cascading**: How wrangler configs, package.json scripts, and build tools interact
+
+AI-assisted coding significantly accelerated development while maintaining code quality and ensuring all assignment requirements are properly fulfilled. The debugging process demonstrated the importance of systematic error analysis and understanding the full stack from frontend React to Workers deployment.
 

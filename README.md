@@ -187,13 +187,6 @@ User: "Schedule a reminder to call John tomorrow at 3pm"
 Assistant: [Schedules the task and confirms]
 ```
 
-**Get weather:**
-```
-User: "What's the weather in San Francisco?"
-Assistant: [Shows confirmation dialog for weather tool]
-[After confirmation]: "The weather in San Francisco is sunny"
-```
-
 **List scheduled tasks:**
 ```
 User: "Show me all scheduled tasks"

@@ -10,13 +10,85 @@ import { getCurrentAgent } from "agents";
 import { scheduleSchema } from "agents/schedule";
 
 /**
- * Weather information tool that requires human confirmation
- * When invoked, this will present a confirmation dialog to the user
+ * Utility to truncate text to a maximum length with ellipsis
+ */
+function truncateText(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  return text.substring(0, maxLength - 3) + "...";
+}
+
+/**
+ * Utility to detect rate limit errors in API responses
+ */
+function isRateLimitError(status: number): boolean {
+  return status === 429 || status === 403;
+}
+
+/**
+ * Weather information tool that executes automatically
+ * Since it includes an execute function, it will run without user confirmation
+ * This is suitable for read-only information that doesn't need oversight
  */
 const getWeatherInformation = tool({
-  description: "show the weather in a given city to the user",
-  inputSchema: z.object({ city: z.string() })
-  // Omitting execute function makes this tool require human confirmation
+  description: "Get weather information for a given city. Returns weather data that you should then use to write a helpful response to the user.",
+  inputSchema: z.object({ city: z.string() }),
+  execute: async ({ city }) => {
+    try {
+      const { agent } = getCurrentAgent<Chat>();
+      // Access env through type assertion since it's protected but accessible at runtime
+      const apiKey = (agent as any)?.env.OPENWEATHER_API_KEY;
+      
+      if (!apiKey) {
+        return "Weather information is not configured. Please add OPENWEATHER_API_KEY to environment variables.";
+      }
+      
+      console.log(`Getting weather information for ${city}`);
+      
+      // Use OpenWeatherMap API
+      const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${apiKey}&units=metric`;
+      
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        if (response.status === 404) {
+          return `City "${city}" not found. Please check the spelling and try again.`;
+        }
+        if (response.status === 401) {
+          return `Weather API authentication failed. This usually means:
+1. Your API key is newly created and needs time to activate (can take up to 2 hours, usually much faster)
+2. Your API key might be invalid
+
+Please wait a few minutes and try again, or verify your OPENWEATHER_API_KEY in .dev.vars is correct.`;
+        }
+        if (isRateLimitError(response.status)) {
+          return `Weather API rate limit reached. Free tier allows 1,000 calls per day. Please try again later or upgrade your API plan.`;
+        }
+        return `Unable to fetch weather data (Error ${response.status}). Please try again later.`;
+      }
+      
+      const data = await response.json() as any;
+      
+      // Format weather information
+      const weather = {
+        city: data.name,
+        country: data.sys.country,
+        temperature: Math.round(data.main.temp),
+        feelsLike: Math.round(data.main.feels_like),
+        description: data.weather[0].description,
+        humidity: data.main.humidity,
+        windSpeed: data.wind.speed
+      };
+      
+      return `Weather in ${weather.city}, ${weather.country}:
+- Temperature: ${weather.temperature}°C (feels like ${weather.feelsLike}°C)
+- Conditions: ${weather.description}
+- Humidity: ${weather.humidity}%
+- Wind Speed: ${weather.windSpeed} m/s`;
+    } catch (error) {
+      console.error("Weather fetch error:", error);
+      return `Error fetching weather: ${error instanceof Error ? error.message : 'Unknown error'}`;
+    }
+  }
 });
 
 /**
@@ -25,44 +97,84 @@ const getWeatherInformation = tool({
  * This is suitable for low-risk operations that don't need oversight
  */
 const getLocalTime = tool({
-  description: "get the local time for a specified location",
-  inputSchema: z.object({ location: z.string() }),
+  description: "Get the local time for a specified location (city or timezone). Returns time data that you should then use to write a helpful response to the user.",
+  inputSchema: z.object({ location: z.string().describe("City name or timezone (e.g., 'New York', 'America/New_York', 'London', 'Europe/London')") }),
   execute: async ({ location }) => {
-    console.log(`Getting local time for ${location}`);
-    
-    // Get current time in the requested location
-    const now = new Date();
-    const timeString = now.toLocaleTimeString('en-US', { 
-      timeZone: getTimezone(location),
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true 
-    });
-    
-    return `The current time in ${location} is ${timeString}.`;
+    try {
+      console.log(`Getting local time for ${location}`);
+      
+      // Try to use the location as a timezone first
+      let timezone = location;
+      
+      // Common city to timezone mappings
+      const cityTimezones: Record<string, string> = {
+        'new york': 'America/New_York',
+        'los angeles': 'America/Los_Angeles',
+        'chicago': 'America/Chicago',
+        'london': 'Europe/London',
+        'paris': 'Europe/Paris',
+        'tokyo': 'Asia/Tokyo',
+        'sydney': 'Australia/Sydney',
+        'dubai': 'Asia/Dubai',
+        'singapore': 'Asia/Singapore',
+        'hong kong': 'Asia/Hong_Kong',
+        'mumbai': 'Asia/Kolkata',
+        'delhi': 'Asia/Kolkata',
+        'beijing': 'Asia/Shanghai',
+        'shanghai': 'Asia/Shanghai',
+        'moscow': 'Europe/Moscow',
+        'berlin': 'Europe/Berlin',
+        'toronto': 'America/Toronto',
+        'vancouver': 'America/Vancouver',
+        'san francisco': 'America/Los_Angeles',
+        'seattle': 'America/Los_Angeles',
+        'boston': 'America/New_York',
+        'miami': 'America/New_York',
+        'mexico city': 'America/Mexico_City',
+        'sao paulo': 'America/Sao_Paulo',
+        'buenos aires': 'America/Argentina/Buenos_Aires',
+        'cairo': 'Africa/Cairo',
+        'johannesburg': 'Africa/Johannesburg',
+        'istanbul': 'Europe/Istanbul',
+        'bangkok': 'Asia/Bangkok',
+        'seoul': 'Asia/Seoul',
+        'melbourne': 'Australia/Melbourne',
+        'auckland': 'Pacific/Auckland'
+      };
+      
+      // Check if location is a known city
+      const normalizedLocation = location.toLowerCase().trim();
+      if (cityTimezones[normalizedLocation]) {
+        timezone = cityTimezones[normalizedLocation];
+      }
+      
+      // Try to format the time using the timezone
+      try {
+        const now = new Date();
+        const formatter = new Intl.DateTimeFormat('en-US', {
+          timeZone: timezone,
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          timeZoneName: 'long'
+        });
+        
+        const timeString = formatter.format(now);
+        return `Current time in ${location}:\n${timeString}`;
+      } catch (timezoneError) {
+        // If timezone is invalid, return a helpful error
+        return `Unable to find timezone for "${location}". Please use a major city name (e.g., "New York", "London", "Tokyo") or a standard timezone format (e.g., "America/New_York", "Europe/London").`;
+      }
+    } catch (error) {
+      console.error("Time fetch error:", error);
+      return `Error fetching time: ${error instanceof Error ? error.message : 'Unknown error'}`;
+    }
   }
 });
-
-// Helper function to map locations to timezones
-function getTimezone(location: string): string {
-  const timezones: Record<string, string> = {
-    'new york': 'America/New_York',
-    'nyc': 'America/New_York',
-    'los angeles': 'America/Los_Angeles',
-    'la': 'America/Los_Angeles',
-    'chicago': 'America/Chicago',
-    'london': 'Europe/London',
-    'paris': 'Europe/Paris',
-    'tokyo': 'Asia/Tokyo',
-    'sydney': 'Australia/Sydney',
-    'san francisco': 'America/Los_Angeles',
-    'seattle': 'America/Los_Angeles',
-    'boston': 'America/New_York',
-  };
-  
-  const key = location.toLowerCase();
-  return timezones[key] || 'America/New_York'; // Default to ET
-}
 
 const scheduleTask = tool({
   description: "A tool to schedule a task to be executed at a later time",
@@ -110,6 +222,17 @@ const getScheduledTasks = tool({
       if (!tasks || tasks.length === 0) {
         return "No scheduled tasks found.";
       }
+      
+      // Limit response size: show max 20 tasks to prevent overflow
+      const MAX_TASKS = 20;
+      if (tasks.length > MAX_TASKS) {
+        const limitedTasks = tasks.slice(0, MAX_TASKS);
+        return {
+          tasks: limitedTasks,
+          message: `Showing ${MAX_TASKS} of ${tasks.length} tasks. Use cancelScheduledTask to remove tasks and see more.`
+        };
+      }
+      
       return tasks;
     } catch (error) {
       console.error("Error listing scheduled tasks", error);
@@ -144,7 +267,7 @@ const cancelScheduledTask = tool({
  * Uses Brave Search API to search the web for current information
  */
 const searchWeb = tool({
-  description: "Search the web for current information, news, facts, or any topic. Use this when you need up-to-date information that you don't already know.",
+  description: "Search the web for current information, news, facts, or any topic. Use this when you need up-to-date information that you don't already know. Returns search results that you should then use to write a comprehensive response answering the user's question.",
   inputSchema: z.object({ 
     query: z.string().describe("The search query")
   }),
@@ -160,10 +283,10 @@ const searchWeb = tool({
       
       console.log(`Searching web for: ${query}`);
       
-      // Build URL with required parameters
+      // Build URL with required parameters - limit to 3 results to keep responses manageable
       const searchUrl = new URL('https://api.search.brave.com/res/v1/web/search');
       searchUrl.searchParams.append('q', query);
-      searchUrl.searchParams.append('count', '5'); // Number of results
+      searchUrl.searchParams.append('count', '3'); // Reduced from 5 to 3 for smaller responses
       
       const response = await fetch(searchUrl.toString(), {
         method: 'GET',
@@ -175,6 +298,9 @@ const searchWeb = tool({
       });
       
       if (!response.ok) {
+        if (isRateLimitError(response.status)) {
+          return `Search API rate limit reached. Free tier allows 2,000 searches per month. Please try again later or upgrade your API plan.`;
+        }
         const errorText = await response.text();
         console.error(`Brave Search API error: ${response.status} - ${errorText}`);
         return `Search temporarily unavailable (Error ${response.status}). Please try again.`;
@@ -182,10 +308,11 @@ const searchWeb = tool({
       
       const data = await response.json() as any;
       
-      // Format top results for the AI
-      const results = data.web?.results?.slice(0, 5).map((r: any) => ({
-        title: r.title,
-        description: r.description,
+      // Format top results for the AI - limit to 3 and truncate descriptions
+      const MAX_DESCRIPTION_LENGTH = 200;
+      const results = data.web?.results?.slice(0, 3).map((r: any) => ({
+        title: truncateText(r.title, 100),
+        description: truncateText(r.description, MAX_DESCRIPTION_LENGTH),
         url: r.url
       })) || [];
       
@@ -223,10 +350,9 @@ export const tools = {
  * Implementation of confirmation-required tools
  * This object contains the actual logic for tools that need human approval
  * Each function here corresponds to a tool above that doesn't have an execute function
+ * 
+ * Currently, all tools auto-execute, so this object is empty.
  */
 export const executions = {
-  getWeatherInformation: async ({ city }: { city: string }) => {
-    console.log(`Getting weather information for ${city}`);
-    return `The weather in ${city} is sunny`;
-  }
+  // No tools currently require confirmation - all auto-execute
 };

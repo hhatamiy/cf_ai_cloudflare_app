@@ -102,21 +102,58 @@ export async function processToolCalls<Tools extends ToolSet>({
 /**
  * Clean up incomplete tool calls from messages before sending to API
  * Prevents API errors from interrupted or failed tool executions
+ * Also converts tool errors to proper format so the model can see them
  */
 export function cleanupMessages(messages: UIMessage[]): UIMessage[] {
-  return messages.filter((message) => {
-    if (!message.parts) return true;
+  const cleaned = messages.map((message) => {
+    if (!message.parts) return message;
 
-    // Filter out messages with incomplete tool calls
-    const hasIncompleteToolCall = message.parts.some((part) => {
+    // Filter out messages with tool calls that are still streaming
+    const hasStreamingToolCall = message.parts.some((part) => {
       if (!isToolUIPart(part)) return false;
-      // Remove tool calls that are still streaming or awaiting input without results
-      return (
-        part.state === "input-streaming" ||
-        (part.state === "input-available" && !part.output && !part.errorText)
-      );
+      return part.state === "input-streaming";
     });
 
-    return !hasIncompleteToolCall;
-  });
+    if (hasStreamingToolCall) {
+      return null; // Filter out this message
+    }
+
+    // Process tool parts to convert errors to proper format
+    const processedParts = message.parts.map((part) => {
+      // Convert tool errors to have the error as output so the model can see it
+      if (isToolUIPart(part) && part.state === "output-error") {
+        // Extract error text from the part
+        const errorText = (part as any).errorText || "An error occurred while executing the tool";
+        // Convert to output-available state with error as output
+        // Remove errorText property since it's not allowed in output-available state
+        const { errorText: _, ...partWithoutErrorText } = part as any;
+        return {
+          ...partWithoutErrorText,
+          state: "output-available" as const,
+          output: errorText
+        };
+      }
+      return part;
+    });
+
+    // For assistant messages with tool calls, remove empty text parts
+    // Empty text parts before tool calls can cause the model to think it's done
+    if (message.role === "assistant" && processedParts) {
+      const hasToolCall = processedParts.some((part) => isToolUIPart(part));
+      if (hasToolCall) {
+        const cleanedParts = processedParts.filter((part) => {
+          // Remove empty text parts that come before tool calls
+          if (part.type === "text" && (!part.text || part.text.trim().length === 0)) {
+            return false;
+          }
+          return true;
+        });
+        return { ...message, parts: cleanedParts };
+      }
+    }
+
+    return { ...message, parts: processedParts };
+  }).filter((msg): msg is UIMessage => msg !== null);
+
+  return cleaned;
 }

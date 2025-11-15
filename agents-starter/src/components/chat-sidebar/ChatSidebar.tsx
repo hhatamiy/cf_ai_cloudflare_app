@@ -5,6 +5,7 @@ interface Chat {
   id: string;
   title: string;
   createdAt: Date;
+  lastActivity: Date;
 }
 
 interface ChatSidebarProps {

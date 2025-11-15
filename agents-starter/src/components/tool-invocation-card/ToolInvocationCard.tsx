@@ -60,6 +60,9 @@ export function ToolInvocationCard({
           {!needsConfirmation && toolUIPart.state === "output-available" && (
             <span className="text-xs text-[#F48120]/70">✓ Completed</span>
           )}
+          {toolUIPart.state === "output-error" && (
+            <span className="text-xs text-red-500/70">✗ Error</span>
+          )}
         </h4>
         <CaretDown
           size={16}
@@ -99,6 +102,15 @@ export function ToolInvocationCard({
               >
                 Approve
               </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onSubmit({ toolCallId, result: APPROVAL.NO })}
+                className="text-xs text-muted-foreground"
+                title="Cancel this tool call"
+              >
+                Skip
+              </Button>
             </div>
           )}
 
@@ -129,6 +141,20 @@ export function ToolInvocationCard({
                       .join("\n");
                   }
                   return JSON.stringify(result, null, 2);
+                })()}
+              </pre>
+            </div>
+          )}
+
+          {toolUIPart.state === "output-error" && (
+            <div className="mt-3 border-t border-red-500/20 pt-3">
+              <h5 className="text-xs font-medium mb-1 text-red-500/70">
+                Error:
+              </h5>
+              <pre className="bg-red-500/10 border border-red-500/20 p-2 rounded-md text-xs overflow-auto whitespace-pre-wrap break-words max-w-[450px] text-red-500/90">
+                {(() => {
+                  const errorText = (toolUIPart as any).errorText || "An error occurred";
+                  return errorText;
                 })()}
               </pre>
             </div>

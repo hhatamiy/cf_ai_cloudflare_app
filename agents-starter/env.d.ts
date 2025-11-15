@@ -5,6 +5,7 @@ declare namespace Cloudflare {
 		Chat: DurableObjectNamespace<import("./src/server").Chat>;
 		AI: Ai;
 		BRAVE_SEARCH_API_KEY: string;
+		OPENWEATHER_API_KEY: string;
 	}
 }
 interface Env extends Cloudflare.Env {}

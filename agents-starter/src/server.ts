@@ -9,8 +9,7 @@ import {
   convertToModelMessages,
   createUIMessageStreamResponse,
   type ToolSet,
-  isToolUIPart,
-  type UIMessage
+  isToolUIPart
 } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
 import { processToolCalls, cleanupMessages } from "./utils";
@@ -66,57 +65,8 @@ export class Chat extends AIChatAgent<Env> {
             executions
           });
 
-          // CRITICAL FIX: Check if the last message is an assistant message with tool call but no text response
-          // The model MUST always generate text after calling a tool, but sometimes it doesn't
-          // If so, we need to add a system message to prompt the model to respond
-          const lastProcessedMessage = processedMessages[processedMessages.length - 1];
-          if (lastProcessedMessage?.role === "assistant" && lastProcessedMessage.parts) {
-            // Check if there's any completed tool call
-            const hasCompletedToolCall = lastProcessedMessage.parts.some((part) => {
-              if (!isToolUIPart(part)) return false;
-              const toolPart = part as any;
-              return toolPart.state === "output-available";
-            });
-            
-            // Check if there's any meaningful text content
-            const hasNoTextContent = !lastProcessedMessage.parts.some((part) => 
-              part.type === "text" && part.text && part.text.trim().length > 0
-            );
-            
-            // If we have a tool call result but no text response, force the model to continue
-            if (hasCompletedToolCall && hasNoTextContent) {
-              console.warn("Tool call completed without text response - adding continuation prompt");
-              
-              // Check if the tool had an error
-              const hasToolError = lastProcessedMessage.parts.some((part) => {
-                if (!isToolUIPart(part)) return false;
-                const toolPart = part as any;
-                if (toolPart.state !== "output-available") return false;
-                const output = typeof toolPart.output === "string" ? toolPart.output.toLowerCase() : "";
-                return output.includes("error") || output.includes("invalid") || output.includes("failed");
-              });
-              
-              // Add a user message to prompt the model to explain the tool result
-              const promptText = hasToolError 
-                ? "[System: The tool call failed with an error. Please explain to the user what went wrong and how they can provide the correct input format.]"
-                : "[System: The tool call completed successfully. Please explain the result to the user in a natural, conversational way.]";
-              
-              processedMessages = [
-                ...processedMessages,
-                {
-                  id: generateId(),
-                  role: "user",
-                  parts: [{
-                    type: "text",
-                    text: promptText
-                  }],
-                  metadata: {
-                    createdAt: new Date()
-                  }
-                } as UIMessage
-              ];
-            }
-          }
+          // Note: Tool call handling is done after streamText completes
+          // See the multi-turn loop implementation below
 
           // Create Workers AI instance with Llama 3.3 70B model
           const workersai = createWorkersAI({ binding: this.env.AI });
@@ -127,45 +77,50 @@ export class Chat extends AIChatAgent<Env> {
           console.log("Messages being sent to model:", JSON.stringify(processedMessages.slice(-3), null, 2));
 
           const result = streamText({
-            system: `You are a helpful AI assistant. When users ask questions, you must ALWAYS provide a complete text answer.
+            system: `You are a helpful, knowledgeable AI assistant. When users ask questions, you provide thorough, detailed, and engaging responses.
 
-CRITICAL RULE: NEVER stop without providing a text response. Even after using a tool, you MUST explain the result to the user in your own words.
+RESPONSE STYLE:
+- Write detailed, comprehensive answers (3-5 sentences minimum for most queries)
+- Use natural, conversational language that's easy to understand
+- Add context and relevant details to make responses more informative
+- Be friendly, professional, and helpful
+- When appropriate, provide additional insights or related information
 
-Your process:
-1. When a user asks a question, decide if you need a tool
-2. If you need a tool (like getLocalTime, searchWeb, etc.), call it
-3. After getting the tool result, IMMEDIATELY write a natural response explaining the result
-4. NEVER end your turn without generating explanatory text
+TOOL USAGE RULES (CRITICAL):
+1. When a user asks a question, determine if you need a tool
+2. If you need a tool (getLocalTime, getWeatherInformation, searchWeb, etc.), call it
+3. After getting the tool result, you MUST write a detailed natural response explaining the result
+4. NEVER end your turn without generating a thorough text explanation
 
-Example correct behavior:
+Example of CORRECT behavior:
 - User: "What time is it in London?"
 - You call getLocalTime tool → Get result: "Saturday, November 15, 2025 at 07:02:24 AM GMT"
-- You MUST then write: "It's currently 7:02 AM on Saturday, November 15th in London."
+- You write: "The current time in London is 7:02 AM on Saturday, November 15th, 2025. London is currently observing Greenwich Mean Time (GMT), which is the standard time zone for the UK during winter months. It's early morning there, so most people are probably just starting their day!"
 
-Example WRONG behavior (NEVER do this):
+Example of WRONG behavior (NEVER do this):
 - User: "What time is it in London?"
 - You call getLocalTime tool → Get result
 - You stop without explaining ❌ WRONG!
 
 Available tools:
 - getLocalTime: Get current time in any city
-- getWeatherInformation: Get weather for any city
-- searchWeb: Search the web for information
-- scheduleTask: Schedule a task
-- getScheduledTasks: List scheduled tasks
-- cancelScheduledTask: Cancel a task
+- getWeatherInformation: Get weather for any city (temperature, conditions, humidity, wind)
+- searchWeb: Search the web for current information and news
+- scheduleTask: Schedule a task for later execution
+- getScheduledTasks: List all scheduled tasks
+- cancelScheduledTask: Cancel a specific task
 
-MANDATORY: After every tool call, write a conversational response. The tool result is not enough - explain it naturally.
+MANDATORY: After every tool call, write a detailed, conversational response that explains and contextualizes the result. Raw tool output is never enough.
 
 Current date: ${new Date().toLocaleDateString()}
 
-Be concise, friendly, and helpful.`,
+Remember: Be thorough, engaging, and always explain your findings in detail.`,
 
             messages: convertToModelMessages(processedMessages),
             model,
             tools: allTools,
-            // Note: Response length is controlled by the system prompt instructing concise responses
-            // and by limiting tool output sizes (web search, scheduled tasks, etc.)
+            // Note: Response length is now encouraged to be detailed and comprehensive
+            // Tool output sizes are limited (web search, scheduled tasks, etc.) to prevent overflow
             // Type boundary: streamText expects specific tool types, but base class uses ToolSet
             // This is safe because our tools satisfy ToolSet interface (verified by 'satisfies' in tools.ts)
             onFinish: onFinish as unknown as StreamTextOnFinishCallback<
@@ -176,92 +131,68 @@ Be concise, friendly, and helpful.`,
           // Merge the result stream - this handles tool calls and waits for results
           await writer.merge(result.toUIMessageStream());
           
-          // CRITICAL FIX: After stream completes, check if we got a tool result but no text explanation
-          // Wait a moment for messages to be saved, then check the actual messages
-          await new Promise(resolve => setTimeout(resolve, 100));
+          // CRITICAL FIX FOR LLAMA MODELS: Multi-turn tool execution flow
+          // Wait a moment for messages to be saved after stream completes
+          await new Promise(resolve => setTimeout(resolve, 150));
+          
+          // Check the actual messages to see if tool calls completed without text response
           const currentMessages = this.messages;
           const lastMessage = currentMessages[currentMessages.length - 1];
           
           if (lastMessage?.role === "assistant" && lastMessage.parts) {
-            // Check if there's a completed tool call
-            const toolPart = lastMessage.parts.find((part) => {
+            // Check if there are completed tool calls
+            const toolParts = lastMessage.parts.filter((part) => {
               if (!isToolUIPart(part)) return false;
               const tp = part as any;
               return tp.state === "output-available";
-            }) as any;
+            });
             
             // Check if there's no text content
             const hasNoTextContent = !lastMessage.parts.some((part) => 
               part.type === "text" && part.text && part.text.trim().length > 0
             );
             
-            // If we have a tool result but no text, manually write a response
-            if (toolPart && hasNoTextContent && toolPart.output) {
-              console.warn("Tool completed but no text response - manually generating explanation");
+            // If we have tool results but no text response, call the model again
+            if (toolParts.length > 0 && hasNoTextContent) {
+              console.warn("Tool call(s) completed without text response - calling model again");
               
-              // Extract the tool output
-              const toolOutput = typeof toolPart.output === "string" ? toolPart.output : JSON.stringify(toolPart.output);
-              const toolName = toolPart.type.replace("tool-", "");
-              
-              // Generate a simple explanation based on the tool output
-              let explanation = "";
-              if (toolOutput.toLowerCase().includes("not found") || toolOutput.toLowerCase().includes("error")) {
-                explanation = `I encountered an issue: ${toolOutput}`;
-              } else if (toolName === "getLocalTime") {
-                // Extract time from output like "Current time in London:\nSaturday, November 15, 2025 at 07:02:24 AM GMT"
-                const timeMatch = toolOutput.match(/at (.+)$/m);
-                if (timeMatch) {
-                  explanation = `It's currently ${timeMatch[1]} in ${toolPart.input?.location || "that location"}.`;
-                } else {
-                  explanation = toolOutput;
-                }
-              } else if (toolName === "getWeatherInformation") {
-                explanation = `Here's the weather information: ${toolOutput}`;
-              } else {
-                explanation = toolOutput;
-              }
-              
-              // Write the explanation to the stream
-              try {
-                const textId = generateId();
-                // Write text start, delta, and end
-                await writer.write({
-                  type: "text-start",
-                  id: textId
-                });
-                await writer.write({
-                  type: "text-delta",
-                  delta: explanation,
-                  id: textId
-                });
-                await writer.write({
-                  type: "text-end",
-                  id: textId
-                });
-              } catch (writeError) {
-                // If stream is already closed, update the message directly
-                console.warn("Stream closed, updating message directly:", writeError);
-                try {
-                  // Update the last message to include the text explanation
-                  const updatedMessages = [...currentMessages];
-                  const lastIndex = updatedMessages.length - 1;
-                  if (updatedMessages[lastIndex]?.role === "assistant") {
-                    updatedMessages[lastIndex] = {
-                      ...updatedMessages[lastIndex],
-                      parts: [
-                        ...(updatedMessages[lastIndex].parts || []),
-                        {
-                          type: "text",
-                          text: explanation
-                        }
-                      ]
-                    };
-                    await this.saveMessages(updatedMessages);
+              // Add an explicit user message to prompt the model to respond
+              // This is more reliable than system prompts for Llama models
+              const messagesWithPrompt = [
+                ...currentMessages,
+                {
+                  id: generateId(),
+                  role: "user" as const,
+                  parts: [{
+                    type: "text" as const,
+                    text: "Please explain the tool result above to me in a clear, natural way."
+                  }],
+                  metadata: {
+                    createdAt: new Date()
                   }
-                } catch (saveError) {
-                  console.error("Error updating message directly:", saveError);
                 }
-              }
+              ];
+              
+              // Create continuation WITHOUT providing tools to prevent infinite loops
+              const continuationResult = streamText({
+                system: `You are a helpful, knowledgeable AI assistant. The user is asking you to explain the tool result that was just returned.
+
+Write a detailed, thorough response that:
+- Clearly explains what the tool found
+- Provides context and additional insights
+- Uses natural, conversational language
+- Is 3-5 sentences long to be comprehensive
+- Adds value beyond just repeating the raw data
+
+Be engaging, informative, and helpful!`,
+                messages: convertToModelMessages(messagesWithPrompt),
+                model,
+                // CRITICAL: Don't pass tools to continuation to prevent calling tools again
+                onFinish: onFinish as unknown as StreamTextOnFinishCallback<typeof allTools>
+              });
+              
+              // Merge the continuation response into the stream
+              await writer.merge(continuationResult.toUIMessageStream());
             }
           }
         } catch (error) {

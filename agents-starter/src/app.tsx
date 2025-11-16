@@ -213,15 +213,15 @@ export default function Chat() {
                   <ul className="text-sm text-left space-y-2">
                     <li className="flex items-center gap-2">
                       <span className="text-[#F48120]">•</span>
-                      <span>What's the weather in Tokyo?</span>
+                      <span>Write me a paragraph on why soccer is the best sport in the world</span>
                     </li>
                     <li className="flex items-center gap-2">
                       <span className="text-[#F48120]">•</span>
-                      <span>What time is it in London?</span>
+                      <span>Who is Donald Duck?</span>
                     </li>
                     <li className="flex items-center gap-2">
                       <span className="text-[#F48120]">•</span>
-                      <span>What tasks do I have scheduled?</span>
+                      <span>What was the hottest temperature ever recorded in the world?</span>
                     </li>
                   </ul>
                 </div>
@@ -290,13 +290,21 @@ export default function Chat() {
                                       🕒
                                     </span>
                                   )}
-                                  <MemoizedMarkdown
-                                    id={`${m.id}-${i}`}
-                                    content={part.text.replace(
-                                      /^scheduled message: /,
-                                      ""
+                                  <div className="relative">
+                                    <MemoizedMarkdown
+                                      id={`${m.id}-${i}`}
+                                      content={part.text.replace(
+                                        /^scheduled message: /,
+                                        ""
+                                      )}
+                                    />
+                                    {/* Show typing cursor if this is the last message and AI is still streaming */}
+                                    {!isUser && 
+                                     index === agentMessages.length - 1 && 
+                                     (status === "streaming" || status === "submitted") && (
+                                      <span className="inline-block w-1 h-4 ml-1 bg-[#F48120] animate-pulse" />
                                     )}
-                                  />
+                                  </div>
                                 </Card>
                                 <p
                                   className={`text-xs text-muted-foreground mt-1 ${
@@ -379,9 +387,18 @@ export default function Chat() {
             // This ensures we show loading even after tool calls complete but before text is generated
             return agentMessages.length === 0 || !hasAssistantMessage || !hasTextContent;
           })() && (
-            <div className="flex justify-start">
+            <div className={`flex justify-start ${agentMessages.length > 0 ? '-mt-13' : ''}`}>
               <div className="flex gap-3 max-w-[85%]">
-                <Avatar username={"AI"} size="base" className="flex-shrink-0" />
+                {/* Only show avatar if last message wasn't from assistant (to avoid duplicate avatars) */}
+                {(() => {
+                  const lastMessage = agentMessages[agentMessages.length - 1];
+                  const showAvatar = agentMessages.length === 0 || lastMessage?.role !== "assistant";
+                  return showAvatar ? (
+                    <Avatar username={"AI"} size="base" className="flex-shrink-0" />
+                  ) : (
+                    <div className="w-8 flex-shrink-0" />
+                  );
+                })()}
                 <div>
                   <Card className="p-3 rounded-md bg-neutral-100 dark:bg-neutral-900 rounded-bl-none border-assistant-border">
                     <div className="flex items-center gap-2">

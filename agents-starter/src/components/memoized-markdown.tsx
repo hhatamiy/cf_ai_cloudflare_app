@@ -22,14 +22,27 @@ const MemoizedMarkdownBlock = memo(
 
 MemoizedMarkdownBlock.displayName = "MemoizedMarkdownBlock";
 
-export const MemoizedMarkdown = memo(
-  ({ content, id }: { content: string; id: string }) => {
-    const blocks = useMemo(() => parseMarkdownIntoBlocks(content), [content]);
-    return blocks.map((block, index) => (
-      // biome-ignore lint/suspicious/noArrayIndexKey: immutable index
-      <MemoizedMarkdownBlock content={block} key={`${id}-block_${index}`} />
-    ));
-  }
-);
+export const MemoizedMarkdown = ({ content, id }: { content: string; id: string }) => {
+  // Parse content into blocks for better streaming visualization
+  const blocks = useMemo(() => parseMarkdownIntoBlocks(content), [content]);
+  
+  // For streaming, we want to show the last block immediately without memoization
+  // so it updates as text streams in
+  return (
+    <>
+      {blocks.slice(0, -1).map((block, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: immutable index
+        <MemoizedMarkdownBlock content={block} key={`${id}-block_${index}`} />
+      ))}
+      {blocks.length > 0 && (
+        <div className="markdown-body">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {blocks[blocks.length - 1]}
+          </ReactMarkdown>
+        </div>
+      )}
+    </>
+  );
+};
 
 MemoizedMarkdown.displayName = "MemoizedMarkdown";
